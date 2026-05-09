@@ -94,7 +94,7 @@ fun PreviewScreen(
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(16f / 9f)
+                .aspectRatio(3f / 4f)
         ) {
             Box(
                 modifier = Modifier.fillMaxSize()

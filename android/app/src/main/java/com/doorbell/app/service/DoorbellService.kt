@@ -236,7 +236,7 @@ class DoorbellService : Service() {
                 cameraProvider = cameraProviderFuture.get()
 
                 imageAnalysisUseCase = ImageAnalysis.Builder()
-                    .setTargetResolution(Size(1280, 720))
+                    .setTargetResolution(Size(960, 720))
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .build()
                     .also { analysis ->
