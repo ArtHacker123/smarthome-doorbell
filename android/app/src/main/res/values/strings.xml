@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Smart Doorbell</string>
+    <string name="start">Start</string>
+    <string name="stop">Stop</string>
+    <string name="settings">Settings</string>
+    <string name="events">Events</string>
+    <string name="preview">Preview</string>
+</resources>
