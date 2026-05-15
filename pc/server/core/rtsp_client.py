@@ -3,7 +3,7 @@ RTSP client for receiving video streams from mobile devices.
 """
 import asyncio
 import logging
-from typing import Optional, Callable
+from typing import Dict, Optional, Callable
 import threading
 
 logger = logging.getLogger(__name__)
@@ -73,7 +73,7 @@ class RTSPClient:
 
 class RTSPStreamManager:
     def __init__(self):
-        self._clients: dict[str, RTSPClient] = {}
+        self._clients: Dict[str, RTSPClient] = {}
 
     async def add_stream(self, device_id: str, device_ip: str, port: int = 8554) -> RTSPClient:
         client = RTSPClient(device_ip, port)
@@ -91,7 +91,7 @@ class RTSPStreamManager:
     async def get_stream(self, device_id: str) -> Optional[RTSPClient]:
         return self._clients.get(device_id)
 
-    async def get_all_streams(self) -> dict[str, RTSPClient]:
+    async def get_all_streams(self) -> Dict[str, RTSPClient]:
         return self._clients.copy()
 
     async def reconnect_all(self):
