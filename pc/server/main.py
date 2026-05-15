@@ -175,7 +175,7 @@ class DoorbellServer:
                         await websocket.send_json({"type": "heartbeat_ack"})
                         
             except WebSocketDisconnect:
-                ws_manager.manager.disconnect(websocket, device_id)
+                ws_manager.disconnect(websocket, device_id)
             except Exception as e:
                 logger.error(f"WebSocket error: {e}")
 
