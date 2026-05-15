@@ -188,7 +188,9 @@ class DoorbellService : Service() {
         motionDetector = MotionDetector(config.motionSensitivity, config.motionPixelThreshold)
 
         if (config.pcServerAddress.isNotEmpty()) {
-            webSocketClient = WebSocketClient(config.pcServerAddress, config.pcServerPort)
+            webSocketClient = WebSocketClient(config.pcServerAddress, config.pcServerPort).also {
+                it.deviceInfo = DeviceInfo(deviceId = deviceId)
+            }
             webSocketClient?.connectionState?.onEach { _connectionState.value = it }?.launchIn(serviceScope)
             webSocketClient?.connect()
         }

@@ -28,6 +28,8 @@ class WebSocketClient(
     private var reconnectJob: Job? = null
     private var pingJob: Job? = null
 
+    var deviceInfo: DeviceInfo? = null
+
     enum class ConnectionState {
         CONNECTING,
         CONNECTED,
@@ -48,6 +50,7 @@ class WebSocketClient(
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 _connectionState.value = ConnectionState.CONNECTED
+                deviceInfo?.let { registerDevice(it) }
                 startPing()
             }
 
