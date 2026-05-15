@@ -24,6 +24,7 @@ fun SettingsScreen(
     var cooldown by remember(config) { mutableIntStateOf(config.cooldown) }
     var motionSensitivity by remember(config) { mutableFloatStateOf(config.motionSensitivity) }
     var motionPixelThreshold by remember(config) { mutableIntStateOf(config.motionPixelThreshold) }
+    var zoomRatio by remember(config) { mutableFloatStateOf(config.zoomRatio) }
     var recordDuration by remember(config) { mutableIntStateOf(config.recordDuration) }
     var retentionDays by remember(config) { mutableIntStateOf(config.retentionDays) }
     var screenTimeout by remember(config) { mutableIntStateOf(config.screenTimeout) }
@@ -104,6 +105,16 @@ fun SettingsScreen(
                 steps = 17
             )
 
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text("Zoom Ratio: ${String.format("%.1f", zoomRatio)}x")
+            Slider(
+                value = zoomRatio,
+                onValueChange = { zoomRatio = it },
+                valueRange = 1f..10f,
+                steps = 17
+            )
+
             Divider(modifier = Modifier.padding(vertical = 16.dp))
 
             Text(
@@ -181,6 +192,7 @@ fun SettingsScreen(
                             cooldown = cooldown,
                             motionSensitivity = motionSensitivity,
                             motionPixelThreshold = motionPixelThreshold,
+                            zoomRatio = zoomRatio,
                             recordDuration = recordDuration,
                             retentionDays = retentionDays,
                             screenTimeout = screenTimeout,

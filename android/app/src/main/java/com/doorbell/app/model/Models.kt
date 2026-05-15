@@ -12,6 +12,7 @@ data class DoorbellConfig(
     val screenTimeout: Int = 30,
     val motionSensitivity: Float = 0.05f,
     val motionPixelThreshold: Int = 30,
+    val zoomRatio: Float = 9.0f,
     val pcServerAddress: String = "",
     val pcServerPort: Int = 8080,
     val rtspPort: Int = 8554

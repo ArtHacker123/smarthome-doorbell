@@ -21,6 +21,7 @@ class ConfigRepository(private val context: Context) {
         val SCREEN_TIMEOUT = intPreferencesKey("screen_timeout")
         val MOTION_SENSITIVITY = floatPreferencesKey("motion_sensitivity")
         val MOTION_PIXEL_THRESHOLD = intPreferencesKey("motion_pixel_threshold")
+        val ZOOM_RATIO = floatPreferencesKey("zoom_ratio")
         val PC_SERVER_ADDRESS = stringPreferencesKey("pc_server_address")
         val PC_SERVER_PORT = intPreferencesKey("pc_server_port")
         val RTSP_PORT = intPreferencesKey("rtsp_port")
@@ -38,6 +39,7 @@ class ConfigRepository(private val context: Context) {
             screenTimeout = preferences[SCREEN_TIMEOUT] ?: 30,
             motionSensitivity = preferences[MOTION_SENSITIVITY] ?: 0.05f,
             motionPixelThreshold = preferences[MOTION_PIXEL_THRESHOLD] ?: 30,
+            zoomRatio = preferences[ZOOM_RATIO] ?: 9.0f,
             pcServerAddress = preferences[PC_SERVER_ADDRESS] ?: "",
             pcServerPort = preferences[PC_SERVER_PORT] ?: 8080,
             rtspPort = preferences[RTSP_PORT] ?: 8554
@@ -58,6 +60,7 @@ class ConfigRepository(private val context: Context) {
             preferences[SCREEN_TIMEOUT] = config.screenTimeout
             preferences[MOTION_SENSITIVITY] = config.motionSensitivity
             preferences[MOTION_PIXEL_THRESHOLD] = config.motionPixelThreshold
+            preferences[ZOOM_RATIO] = config.zoomRatio
             preferences[PC_SERVER_ADDRESS] = config.pcServerAddress
             preferences[PC_SERVER_PORT] = config.pcServerPort
             preferences[RTSP_PORT] = config.rtspPort

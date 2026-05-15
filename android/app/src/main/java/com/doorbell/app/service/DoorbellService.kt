@@ -4,6 +4,8 @@ import android.app.*
 import android.content.Context
 import android.content.Intent
 import android.graphics.*
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -230,18 +232,20 @@ class DoorbellService : Service() {
         cameraExecutor = Executors.newSingleThreadExecutor()
         cameraLifecycleOwner.start()
 
+        val maxSize = findMaxYuvSize()
+
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
         cameraProviderFuture.addListener({
             try {
                 cameraProvider = cameraProviderFuture.get()
 
                 imageAnalysisUseCase = ImageAnalysis.Builder()
-                    .setTargetResolution(Size(960, 720))
+                    .setTargetResolution(maxSize)
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .build()
                     .also { analysis ->
                         analysis.setAnalyzer(cameraExecutor!!) { imageProxy ->
-                            Log.d(TAG, "[FRAME] received, state=${_serviceState.value}")
+                            Log.d(TAG, "[FRAME] received, actual=${imageProxy.width}x${imageProxy.height} state=${_serviceState.value}")
                             val now = System.currentTimeMillis()
                             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
                             val screenOn = pm.isInteractive()
@@ -285,6 +289,32 @@ class DoorbellService : Service() {
         }, ContextCompat.getMainExecutor(this))
     }
 
+    private fun findMaxYuvSize(): Size {
+        return try {
+            val cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
+            for (cameraId in cameraManager.cameraIdList) {
+                val characteristics = cameraManager.getCameraCharacteristics(cameraId)
+                val facing = characteristics.get(CameraCharacteristics.LENS_FACING)
+                if (facing != null && facing == CameraCharacteristics.LENS_FACING_BACK) {
+                    val configMap = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: break
+                    val yuvSizes = configMap.getOutputSizes(ImageFormat.YUV_420_888)
+                    if (yuvSizes != null && yuvSizes.isNotEmpty()) {
+                        val max = yuvSizes.maxByOrNull { it.width * it.height }!!
+                        Log.i(TAG, "[ZOOM] Max YUV_420_888 size: ${max.width}x${max.height}")
+                        val sorted = yuvSizes.map { "${it.width}x${it.height}" }
+                        Log.d(TAG, "[ZOOM] Available YUV sizes: $sorted")
+                        return max
+                    }
+                }
+            }
+            Log.w(TAG, "[ZOOM] No back camera YUV sizes found, fallback to 1280x960")
+            Size(1280, 960)
+        } catch (e: Exception) {
+            Log.w(TAG, "[ZOOM] Failed to query max YUV size", e)
+            Size(1280, 960)
+        }
+    }
+
     @OptIn(ExperimentalGetImage::class)
     private fun imageProxyToBitmap(imageProxy: ImageProxy): Bitmap? {
         val img = imageProxy.image ?: return null
@@ -303,26 +333,57 @@ class DoorbellService : Service() {
         val uRowStride = planes[1].rowStride
         val vRowStride = planes[2].rowStride
 
-        val ySize = width * height
-        val uvHeight = height / 2
-        val nv21 = ByteArray(ySize + width * uvHeight)
+        Log.d(TAG, "[ZOOM] planes: Y(rs=$yRowStride lim=${yBuffer.limit()} cap=${yBuffer.capacity()}) " +
+                "U(ps=$uPixelStride rs=$uRowStride lim=${uBuffer.limit()} cap=${uBuffer.capacity()}) " +
+                "V(ps=$vPixelStride rs=$vRowStride lim=${vBuffer.limit()} cap=${vBuffer.capacity()})")
 
-        for (row in 0 until height) {
-            yBuffer.position(row * yRowStride)
-            yBuffer.get(nv21, row * width, width)
+        val expectedYMin = yRowStride * (height - 1) + width
+        if (yBuffer.limit() < expectedYMin) {
+            Log.w(TAG, "[ZOOM] skip frame: Y limit=${yBuffer.limit()} < expected=$expectedYMin " +
+                    "(rs=$yRowStride ${width}x$height)")
+            return null
         }
 
-        var uvPos = ySize
-        for (row in 0 until uvHeight) {
-            for (col in 0 until width / 2) {
-                nv21[uvPos++] = vBuffer.get(row * vRowStride + col * vPixelStride)
-                nv21[uvPos++] = uBuffer.get(row * uRowStride + col * uPixelStride)
+        val uvWidth = width / 2
+        val uvHeight = height / 2
+        val uvAreaMin = uvWidth * uvHeight
+        if (uBuffer.limit() < uvAreaMin || vBuffer.limit() < uvAreaMin) {
+            Log.w(TAG, "[ZOOM] skip frame: U limit=${uBuffer.limit()} V limit=${vBuffer.limit()} < area=$uvAreaMin")
+            return null
+        }
+
+        val cropW = maxOf(2, (width / config.zoomRatio).toInt() / 2 * 2)
+        val cropH = maxOf(2, (height / config.zoomRatio).toInt() / 2 * 2)
+        val cropLeft = (width - cropW) / 2
+        val cropTop = (height - cropH) / 2
+        Log.d(TAG, "[ZOOM] ratio=${config.zoomRatio}x crop=${cropW}x${cropH} at (${cropLeft},${cropTop}) full=${width}x${height}")
+
+        val cropYSize = cropW * cropH
+        val nv21 = ByteArray(cropYSize + cropW * cropH / 2)
+
+        for (row in cropTop until cropTop + cropH) {
+            val yPos = row * yRowStride + cropLeft
+            yBuffer.position(yPos)
+            yBuffer.get(nv21, (row - cropTop) * cropW, cropW)
+        }
+
+        val uvTop = cropTop / 2
+        val uvLeft = cropLeft / 2
+        val uvRows = cropH / 2
+        val uvCols = cropW / 2
+        var uvPos = cropYSize
+        for (row in uvTop until uvTop + uvRows) {
+            val vRowOffset = row * vRowStride
+            val uRowOffset = row * uRowStride
+            for (col in uvLeft until uvLeft + uvCols) {
+                nv21[uvPos++] = vBuffer.get(vRowOffset + col * vPixelStride)
+                nv21[uvPos++] = uBuffer.get(uRowOffset + col * uPixelStride)
             }
         }
 
-        val yuvImage = YuvImage(nv21, ImageFormat.NV21, width, height, null)
+        val yuvImage = YuvImage(nv21, ImageFormat.NV21, cropW, cropH, null)
         val out = ByteArrayOutputStream()
-        yuvImage.compressToJpeg(Rect(0, 0, width, height), 80, out)
+        yuvImage.compressToJpeg(Rect(0, 0, cropW, cropH), 80, out)
         val jpegData = out.toByteArray()
         val bitmap = BitmapFactory.decodeByteArray(jpegData, 0, jpegData.size) ?: return null
 
@@ -501,6 +562,9 @@ class DoorbellService : Service() {
     }
 
     fun updateConfig(newConfig: DoorbellConfig) {
+        if (config.zoomRatio != newConfig.zoomRatio) {
+            Log.d(TAG, "[ZOOM] ratio changed: ${config.zoomRatio}x -> ${newConfig.zoomRatio}x")
+        }
         config = newConfig
         personDetector?.updateConfig(newConfig)
         motionDetector?.let {
