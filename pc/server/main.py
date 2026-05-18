@@ -158,7 +158,7 @@ class DoorbellServer:
             return {"error": "not found"}
 
         async def ws_handler(websocket: WebSocket):
-            await ws_manager.connect(websocket)
+            ws_manager.connect(websocket)
             device_id = "unknown"
             
             try:
