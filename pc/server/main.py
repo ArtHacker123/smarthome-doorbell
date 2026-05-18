@@ -159,6 +159,7 @@ class DoorbellServer:
 
         async def ws_handler(websocket: WebSocket):
             ws_manager.connect(websocket)
+            await websocket.accept()
             device_id = "unknown"
             
             try:
