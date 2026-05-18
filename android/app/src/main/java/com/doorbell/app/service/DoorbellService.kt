@@ -397,9 +397,19 @@ class DoorbellService : Service() {
         }
     }
 
+    private var frameCount = 0
+
     private fun processFrame(bitmap: Bitmap) {
+        frameCount++
         _previewBitmap.value = bitmap
         Log.d(TAG, "[PREVIEW] updated preview bitmap")
+
+        // TEST: simulate person detection at frame 100
+        if (frameCount == 100) {
+            Log.i(TAG, "[TEST] Frame 100 reached, simulating person detection")
+            onPersonDetected()
+            return
+        }
 
         val motion = motionDetector?.detect(bitmap) == true
         Log.d(TAG, "[MOTION] detect=$motion")
