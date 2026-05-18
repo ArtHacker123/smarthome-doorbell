@@ -175,7 +175,7 @@ fun SettingsScreen(
 
             OutlinedTextField(
                 value = pcServerPort.toString(),
-                onValueChange = { pcServerPort = it.toIntOrNull() ?: 8080 },
+                onValueChange = { pcServerPort = it.toIntOrNull() ?: 8000 },
                 label = { Text("PC Server Port") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true

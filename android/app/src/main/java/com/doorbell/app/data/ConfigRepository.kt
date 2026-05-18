@@ -41,7 +41,7 @@ class ConfigRepository(private val context: Context) {
             motionPixelThreshold = preferences[MOTION_PIXEL_THRESHOLD] ?: 30,
             zoomRatio = preferences[ZOOM_RATIO] ?: 9.0f,
             pcServerAddress = preferences[PC_SERVER_ADDRESS] ?: "",
-            pcServerPort = preferences[PC_SERVER_PORT] ?: 8080,
+            pcServerPort = preferences[PC_SERVER_PORT] ?: 8000,
             rtspPort = preferences[RTSP_PORT] ?: 8554
         )
     }
