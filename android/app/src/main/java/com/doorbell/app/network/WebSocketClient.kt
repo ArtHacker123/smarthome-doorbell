@@ -29,6 +29,11 @@ class WebSocketClient(
     private var pingJob: Job? = null
 
     var deviceInfo: DeviceInfo? = null
+    var requestVideoCallback: ((eventId: String) -> Unit)? = null
+
+    fun sendJson(data: Map<String, Any?>) {
+        webSocket?.send(gson.toJson(data))
+    }
 
     enum class ConnectionState {
         CONNECTING,
@@ -84,6 +89,13 @@ class WebSocketClient(
                 }
                 "ping" -> {
                     webSocket?.send(gson.toJson(mapOf("type" to "pong")))
+                }
+                "request_video" -> {
+                    val data = message.data as? Map<*, *>
+                    val eventId = data?.get("eventId") as? String
+                    if (eventId != null) {
+                        requestVideoCallback?.invoke(eventId)
+                    }
                 }
             }
         } catch (e: Exception) {

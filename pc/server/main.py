@@ -7,7 +7,8 @@ import logging
 import os
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+import shutil
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from uvicorn import Config, Server
@@ -135,13 +136,74 @@ class DoorbellServer:
             event = next((e for e in events if e.id == event_id), None)
             if not event:
                 return {"error": "not found"}
+            has_video = bool(event.video_path)
             return {
                 "id": event.id,
                 "deviceId": event.device_id,
                 "timestamp": event.timestamp.isoformat() if event.timestamp else None,
                 "type": event.event_type,
-                "confidence": event.confidence
+                "confidence": event.confidence,
+                "hasVideo": has_video,
+                "videoUrl": event.video_path if has_video else None
             }
+
+        @self.app.post("/api/upload/snapshot")
+        async def upload_snapshot(event_id: str = Form(...), file: UploadFile = File(...)):
+            event_dir = os.path.join(self.config.storage_path, "thumbnails", event_id)
+            os.makedirs(event_dir, exist_ok=True)
+            dest = os.path.join(event_dir, "thumb_0.jpg")
+            loop = asyncio.get_event_loop()
+            def _write():
+                with open(dest, "wb") as f:
+                    shutil.copyfileobj(file.file, f)
+            await loop.run_in_executor(None, _write)
+            url = f"/api/storage/thumbnails/{event_id}/thumb_0.jpg"
+            logger.info(f"Snapshot saved: {dest}")
+            return {"url": url}
+
+        @self.app.post("/api/upload/video")
+        async def upload_video(event_id: str = Form(...), file: UploadFile = File(...)):
+            event_dir = os.path.join(self.config.storage_path, "videos", event_id)
+            os.makedirs(event_dir, exist_ok=True)
+            dest = os.path.join(event_dir, "recording.mp4")
+            loop = asyncio.get_event_loop()
+            def _write():
+                with open(dest, "wb") as f:
+                    shutil.copyfileobj(file.file, f)
+            await loop.run_in_executor(None, _write)
+            url = f"/api/storage/videos/{event_id}/recording.mp4"
+            logger.info(f"Video saved: {dest}")
+
+            from sqlalchemy import update
+            from .models.models import Event
+            async with self.db.async_session() as session:
+                await session.execute(
+                    update(Event).where(Event.id == event_id).values(video_path=url)
+                )
+                await session.commit()
+
+            await ws_manager.broadcast({
+                "type": "video_ready",
+                "data": {"eventId": event_id, "url": url}
+            })
+            return {"url": url}
+
+        @self.app.post("/api/events/{event_id}/request-video")
+        async def request_video(event_id: str):
+            events = await self.db.get_events(limit=1000)
+            event = next((e for e in events if e.id == event_id), None)
+            if not event:
+                raise HTTPException(status_code=404, detail="event not found")
+            device_id = event.device_id
+            ws = ws_manager.device_map.get(device_id)
+            if not ws:
+                raise HTTPException(status_code=503, detail="device offline")
+            await ws.send_json({
+                "type": "request_video",
+                "data": {"eventId": event_id}
+            })
+            logger.info(f"Video requested: event={event_id} device={device_id}")
+            return {"status": "sent"}
 
         @self.app.get("/api/storage/thumbnails/{path:path}")
         async def get_thumbnail(path: str):
@@ -174,6 +236,13 @@ class DoorbellServer:
                         await self.handle_event(message.get("data"))
                     elif message.get("type") == "heartbeat":
                         await websocket.send_json({"type": "heartbeat_ack"})
+                    elif message.get("type") == "video_not_found":
+                        event_id = message.get("data", {}).get("eventId", "unknown")
+                        logger.warning(f"Video not found for event: {event_id}")
+                        await ws_manager.broadcast({
+                            "type": "video_not_found",
+                            "data": {"eventId": event_id}
+                        })
                         
             except WebSocketDisconnect:
                 ws_manager.disconnect(websocket, device_id)

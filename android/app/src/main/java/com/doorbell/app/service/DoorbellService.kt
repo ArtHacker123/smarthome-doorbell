@@ -27,6 +27,7 @@ import com.doorbell.app.data.ConfigRepository
 import com.doorbell.app.detection.PersonDetector
 import com.doorbell.app.detection.MotionDetector
 import com.doorbell.app.model.*
+import com.doorbell.app.network.MediaUploader
 import com.doorbell.app.network.RtspServer
 import com.doorbell.app.network.WebSocketClient
 import com.doorbell.app.storage.ThumbnailManager
@@ -39,6 +40,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
 import java.io.ByteArrayOutputStream
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -55,6 +57,7 @@ class DoorbellService : Service() {
     private var thumbnailManager: ThumbnailManager? = null
     private var videoEncoder: VideoEncoder? = null
     private var webSocketClient: WebSocketClient? = null
+    private var mediaUploader: MediaUploader? = null
     private var rtspServer: RtspServer? = null
 
     private var wakeLock: PowerManager.WakeLock? = null
@@ -93,6 +96,7 @@ class DoorbellService : Service() {
     private var deviceId: String = ""
     private var currentVideoFile: java.io.File? = null
     private val recordingFrames = mutableListOf<Bitmap>()
+    private val videoFileMap = ConcurrentHashMap<String, String>()
 
     private val isServiceRunning = AtomicBoolean(false)
 
@@ -194,6 +198,10 @@ class DoorbellService : Service() {
             }
             webSocketClient?.connectionState?.onEach { _connectionState.value = it }?.launchIn(serviceScope)
             webSocketClient?.connect()
+            webSocketClient?.requestVideoCallback = { eventId ->
+                serviceScope.launch { handleVideoRequest(eventId) }
+            }
+            mediaUploader = MediaUploader(config.pcServerAddress, config.pcServerPort)
         }
 
         rtspServer = RtspServer(this, config.rtspPort)
@@ -460,6 +468,7 @@ class DoorbellService : Service() {
             withContext(Dispatchers.IO) {
                 videoEncoder?.encodeFrames(frames, videoFile)
             }
+            videoFileMap[cmd.eventId] = videoFile.absolutePath
             Log.i(TAG, "[RECORD] finished: ${videoFile.absolutePath}, size=${videoFile.length()} bytes")
         } else {
             Log.w(TAG, "[RECORD] no frames to encode, deleting empty file")
@@ -475,10 +484,11 @@ class DoorbellService : Service() {
             if (saved != null) {
                 paths.add(saved)
                 Log.i(TAG, "[SCREENSHOT] saved #0: $saved")
+                serviceScope.launch {
+                    mediaUploader?.uploadSnapshot(cmd.eventId, java.io.File(saved))
+                }
             }
         }
-        // TODO: 通过 CameraX ImageCapture 拍摄图2、图3
-        // 目前只有检测帧的首张截图
         return paths
     }
 
@@ -494,6 +504,24 @@ class DoorbellService : Service() {
         _events.value = _events.value + event
         webSocketClient?.sendEvent(event)
         Log.i(TAG, "[EVENT] reported via WebSocket: ${event.id}")
+    }
+
+    private suspend fun handleVideoRequest(eventId: String) {
+        Log.i(TAG, "[VIDEO] request received for event: $eventId")
+        val videoPath = videoFileMap[eventId]
+        if (videoPath != null) {
+            val file = java.io.File(videoPath)
+            if (file.exists()) {
+                Log.i(TAG, "[VIDEO] uploading: $videoPath")
+                mediaUploader?.uploadVideo(eventId, file)
+                return
+            }
+        }
+        Log.w(TAG, "[VIDEO] file not found for event: $eventId")
+        webSocketClient?.sendJson(mapOf(
+            "type" to "video_not_found",
+            "data" to mapOf("eventId" to eventId)
+        ))
     }
 
     @Suppress("DEPRECATION")
