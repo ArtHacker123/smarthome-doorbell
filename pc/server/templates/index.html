@@ -100,7 +100,7 @@
         </div>
     </div>
     <script>
-        const API_BASE = 'http://localhost:8000/api';
+        const API_BASE = location.origin + '/api';
         let ws = null;
         
         async function loadEvents() {
@@ -115,33 +115,56 @@
                     return;
                 }
                 
-                list.innerHTML = events.map(e => `
+                list.innerHTML = events.map(e => {
+                    const thumbSrc = e.hasSnapshot ? API_BASE + e.thumbnails[0] : null;
+                    return `
                     <div class="event-item">
-                        <div class="event-thumb" style="background:#ddd;display:flex;align-items:center;justify-content:center;color:#999;">
-                            ${e.thumbnails && e.thumbnails.length > 0 ? `<img src="${API_BASE}/storage/thumbnails/${e.thumbnails[0]}" alt="thumbnail">` : 'No image'}
+                        <div class="event-thumb" style="background:#ddd;display:flex;align-items:center;justify-content:center;color:#999;overflow:hidden;">
+                            ${thumbSrc ? `<img src="${thumbSrc}" alt="snapshot" style="width:100%;height:100%;object-fit:cover;">` : 'No image'}
                         </div>
                         <div class="event-info">
                             <div class="event-type">${e.event_type}</div>
                             <div class="event-time">${new Date(e.timestamp).toLocaleString()}</div>
                             ${e.confidence ? `<div class="event-confidence">Confidence: ${(e.confidence * 100).toFixed(0)}%</div>` : ''}
+                            <div style="margin-top:8px;display:flex;gap:8px;">
+                                ${e.hasVideo ? `<a href="${API_BASE}${e.videoUrl}" target="_blank" class="btn btn-primary" style="padding:4px 12px;font-size:0.8rem;text-decoration:none;">View Video</a>`
+                                    : `<button onclick="requestVideo('${e.id}')" class="btn btn-primary" style="padding:4px 12px;font-size:0.8rem;">Request Video</button>`}
+                            </div>
                         </div>
-                    </div>
-                `).join('');
+                    </div>`;
+                }).join('');
             } catch (err) {
                 document.getElementById('event-list').innerHTML = '<div class="empty-state">Failed to load events</div>';
             }
         }
         
         function connectWebSocket() {
-            ws = new WebSocket('ws://localhost:8080/ws');
+            ws = new WebSocket('ws://' + location.host + '/ws');
             ws.onopen = () => console.log('WebSocket connected');
             ws.onmessage = (e) => {
                 const msg = JSON.parse(e.data);
-                if (msg.type === 'event') loadEvents();
+                if (msg.type === 'event' || msg.type === 'video_ready') loadEvents();
+                if (msg.type === 'video_not_found') {
+                    alert('Video not found on device for event: ' + (msg.data?.eventId || 'unknown'));
+                }
             };
             ws.onclose = () => setTimeout(connectWebSocket, 5000);
         }
         
+        async function requestVideo(eventId) {
+            try {
+                const resp = await fetch(`${API_BASE}/events/${eventId}/request-video`, { method: 'POST' });
+                const data = await resp.json();
+                if (resp.ok) {
+                    alert('Video request sent to device. Waiting for upload...');
+                } else {
+                    alert('Failed: ' + (data.detail || data.error));
+                }
+            } catch (err) {
+                alert('Device offline or unreachable');
+            }
+        }
+
         function switchPage(page) {
             document.querySelectorAll('.page').forEach(p => p.style.display = 'none');
             document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));

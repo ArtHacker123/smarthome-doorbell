@@ -123,7 +123,12 @@ class DoorbellServer:
                     "timestamp": e.timestamp.isoformat() if e.timestamp else None,
                     "type": e.event_type,
                     "confidence": e.confidence,
-                    "thumbnails": [],
+                    "thumbnails": ["/api/storage/thumbnails/{}/thumb_0.jpg".format(e.id)],
+                    "hasSnapshot": os.path.exists(
+                        os.path.join(self.config.storage_path, "thumbnails", e.id, "thumb_0.jpg")
+                    ),
+                    "hasVideo": bool(e.video_path),
+                    "videoUrl": e.video_path,
                     "duration": e.duration,
                     "isRead": e.is_read
                 }
