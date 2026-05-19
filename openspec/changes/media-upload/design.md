@@ -54,8 +54,87 @@ WebSocket 传输大二进制会阻塞其他消息。独立的 HTTP POST 更可�
 ### 3. 不引入新依赖
 
 - Android 复用已有的 `OkHttp` + `coroutines`
-- 服务端使用已有的 `FastAPI` + `aiofiles`（文件写入）
-- 服务端文件元数据复用已有的 SQLite `events` 表，或扩展 `media` 表
+- 服务端使用已有的 `FastAPI` + `asyncio` 内置 API
+- 服务端文件元数据复用已有的 SQLite `events` 表
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ Android (DoorbellService)                               │
+│                                                         │
+│  事件触发 ─→ DetectionCommand ─→ startEventDispatcher    │
+│       │                          │                      │
+│       ├── handleRecording() ─────┤ 录制 3s → MP4        │
+│       │                          │                      │
+│       ├── handleScreenshots() ───┤ 保存截图到本地        │
+│       │     └── serviceScope.launch                     │
+│       │           └── MediaUploader.uploadSnapshot() ───│─→ HTTP POST /api/upload/snapshot
+│       │                          │                      │
+│       └── handleEventReport() ───┤ WebSocket 上报事件    │
+│                                  │                      │
+│  ← WebSocket request_video ──────┤                      │
+│       └── handleVideoRequest() ──┤                      │
+│             └── MediaUploader.uploadVideo() ────────────│─→ HTTP POST /api/upload/video
+│                                                         │
+└─────────────────────────────────────────────────────────┘
+         │ WebSocket                          │ HTTP
+         ▼                                    ▼
+┌─────────────────────────────────────────────────────────┐
+│ Server (FastAPI)                                         │
+│                                                         │
+│  POST /api/upload/snapshot ─→ storage/thumbnails/<id>/   │
+│  POST /api/upload/video    ─→ storage/videos/<id>/       │
+│  POST /api/events/{id}/request-video ─→ WebSocket 通知    │
+│                                                         │
+│  GET /api/events ─→ 返回 hasSnapshot/hasVideo/url        │
+│  GET /api/storage/thumbnails/{path} ─→ 文件服务           │
+│  GET /api/storage/videos/{path}      ─→ 文件服务           │
+│                                                         │
+│  WebSocket 消息:                                         │
+│    request_video → 通知 Android 上传录像                   │
+│    video_ready   → 广播到前端，刷新页面                    │
+│    video_not_found → 广播到前端，提示无法获取               │
+└─────────────────────────────────────────────────────────┘
+```
+
+## API 清单
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/upload/snapshot` | 截图上传 (multipart: event_id + file) |
+| POST | `/api/upload/video` | 录像上传 (multipart: event_id + file) |
+| POST | `/api/events/{event_id}/request-video` | 触发录像拉取 |
+| GET | `/api/events` | 事件列表 (含 hasSnapshot/hasVideo/videoUrl) |
+| GET | `/api/events/{event_id}` | 事件详情 (含 hasVideo/videoUrl) |
+| GET | `/api/storage/thumbnails/{path}` | 截图文件服务 |
+| GET | `/api/storage/videos/{path}` | 录像文件服务 |
+
+## 事件数据流
+
+```
+1. Android 检测到人形
+2. processFrame 发送 DetectionCommand → detectionChannel
+3. startEventDispatcher 并行执行:
+   a. handleRecording  → 收集 3s 帧 → 编码 MP4 → 存入 videoFileMap[eventId]
+   b. handleScreenshots → 保存 JPEG 截图 → 异步 POST 上传截图
+   c. handleEventReport  → WebSocket 上报 JSON 事件（含 eventId）
+4. 服务端存储事件到 SQLite
+5. 前端通过 GET /api/events 加载列表，显示截图和录像状态
+6. 用户点击 "Request Video" → POST request-video → WebSocket 通知 Android
+7. Android handleVideoRequest → 查 videoFileMap → POST 上传录像
+8. 服务端存储录像, 更新 DB, 广播 video_ready → 前端刷新显示
+```
+
+## 实现文件
+
+| 文件 | 角色 |
+|---|---|
+| `pc/server/main.py` | 服务端 REST API + WebSocket 处理 |
+| `pc/server/templates/index.html` | Web 管理页面 |
+| `android/.../network/MediaUploader.kt` | Android HTTP 上传客户端 (OkHttp) |
+| `android/.../network/WebSocketClient.kt` | Android WebSocket 客户端 (新增 request_video 回调) |
+| `android/.../service/DoorbellService.kt` | 事件处理、截图上传触发、录像请求处理 |
 
 ## Risks / Trade-offs
 
