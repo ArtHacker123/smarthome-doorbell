@@ -4,6 +4,8 @@ import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.*
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.asRequestBody
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
@@ -26,7 +28,7 @@ class MediaUploader(
             val body = MultipartBody.Builder()
                 .setType(MultipartBody.FORM)
                 .addFormDataPart("event_id", eventId)
-                .addFormDataPart("file", file.name, RequestBody.create(MediaType.get("image/jpeg"), file))
+                .addFormDataPart("file", file.name, file.asRequestBody("image/jpeg".toMediaType()))
                 .build()
 
             val request = Request.Builder()
@@ -35,7 +37,7 @@ class MediaUploader(
                 .build()
 
             val response = client.newCall(request).execute()
-            val bodyStr = response.body()?.string()
+            val bodyStr = response.body?.string()
             if (response.isSuccessful) {
                 Log.i(TAG, "Snapshot uploaded: event=$eventId -> $bodyStr")
                 bodyStr
@@ -54,7 +56,7 @@ class MediaUploader(
             val body = MultipartBody.Builder()
                 .setType(MultipartBody.FORM)
                 .addFormDataPart("event_id", eventId)
-                .addFormDataPart("file", file.name, RequestBody.create(MediaType.get("video/mp4"), file))
+                .addFormDataPart("file", file.name, file.asRequestBody("video/mp4".toMediaType()))
                 .build()
 
             val request = Request.Builder()
@@ -63,7 +65,7 @@ class MediaUploader(
                 .build()
 
             val response = client.newCall(request).execute()
-            val bodyStr = response.body()?.string()
+            val bodyStr = response.body?.string()
             if (response.isSuccessful) {
                 Log.i(TAG, "Video uploaded: event=$eventId -> $bodyStr")
                 bodyStr

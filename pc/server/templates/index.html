@@ -116,7 +116,7 @@
                 }
                 
                 list.innerHTML = events.map(e => {
-                    const thumbSrc = e.hasSnapshot ? API_BASE + e.thumbnails[0] : null;
+                    const thumbSrc = e.hasSnapshot ? e.thumbnails[0] : null;
                     return `
                     <div class="event-item">
                         <div class="event-thumb" style="background:#ddd;display:flex;align-items:center;justify-content:center;color:#999;overflow:hidden;">
@@ -127,7 +127,7 @@
                             <div class="event-time">${new Date(e.timestamp).toLocaleString()}</div>
                             ${e.confidence ? `<div class="event-confidence">Confidence: ${(e.confidence * 100).toFixed(0)}%</div>` : ''}
                             <div style="margin-top:8px;display:flex;gap:8px;">
-                                ${e.hasVideo ? `<a href="${API_BASE}${e.videoUrl}" target="_blank" class="btn btn-primary" style="padding:4px 12px;font-size:0.8rem;text-decoration:none;">View Video</a>`
+                                ${e.hasVideo ? `<a href="${e.videoUrl}" target="_blank" class="btn btn-primary" style="padding:4px 12px;font-size:0.8rem;text-decoration:none;">View Video</a>`
                                     : `<button onclick="requestVideo('${e.id}')" class="btn btn-primary" style="padding:4px 12px;font-size:0.8rem;">Request Video</button>`}
                             </div>
                         </div>

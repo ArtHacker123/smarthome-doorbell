@@ -7,7 +7,6 @@ import logging
 import os
 from pathlib import Path
 
-import shutil
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -157,13 +156,11 @@ class DoorbellServer:
             event_dir = os.path.join(self.config.storage_path, "thumbnails", event_id)
             os.makedirs(event_dir, exist_ok=True)
             dest = os.path.join(event_dir, "thumb_0.jpg")
-            loop = asyncio.get_event_loop()
-            def _write():
-                with open(dest, "wb") as f:
-                    shutil.copyfileobj(file.file, f)
-            await loop.run_in_executor(None, _write)
+            content = await file.read()
+            with open(dest, "wb") as f:
+                f.write(content)
             url = f"/api/storage/thumbnails/{event_id}/thumb_0.jpg"
-            logger.info(f"Snapshot saved: {dest}")
+            logger.info(f"Snapshot saved: {dest} ({len(content)} bytes)")
             return {"url": url}
 
         @self.app.post("/api/upload/video")
@@ -171,13 +168,11 @@ class DoorbellServer:
             event_dir = os.path.join(self.config.storage_path, "videos", event_id)
             os.makedirs(event_dir, exist_ok=True)
             dest = os.path.join(event_dir, "recording.mp4")
-            loop = asyncio.get_event_loop()
-            def _write():
-                with open(dest, "wb") as f:
-                    shutil.copyfileobj(file.file, f)
-            await loop.run_in_executor(None, _write)
+            content = await file.read()
+            with open(dest, "wb") as f:
+                f.write(content)
             url = f"/api/storage/videos/{event_id}/recording.mp4"
-            logger.info(f"Video saved: {dest}")
+            logger.info(f"Video saved: {dest} ({len(content)} bytes)")
 
             from sqlalchemy import update
             from .models.models import Event
@@ -215,6 +210,7 @@ class DoorbellServer:
             file_path = os.path.join(self.config.storage_path, "thumbnails", path)
             if os.path.exists(file_path):
                 return FileResponse(file_path)
+            logger.warning(f"Thumbnail not found: {file_path}")
             return {"error": "not found"}
 
         @self.app.get("/api/storage/videos/{path:path}")
