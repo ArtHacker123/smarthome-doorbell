@@ -57,6 +57,9 @@ fun DoorbellApp(
                         onStopService()
                         serviceRunning = false
                     },
+                    onTestDetection = {
+                        DoorbellService.currentInstance?.testSimulateDetection()
+                    },
                     onNavigateToSettings = { navController.navigate("settings") },
                     onNavigateToEvents = { navController.navigate("events") }
                 )
@@ -83,6 +86,7 @@ fun PreviewScreen(
     connectionState: WebSocketClient.ConnectionState,
     onStartService: () -> Unit,
     onStopService: () -> Unit,
+    onTestDetection: () -> Unit,
     onNavigateToSettings: () -> Unit,
     onNavigateToEvents: () -> Unit
 ) {
@@ -138,6 +142,21 @@ fun PreviewScreen(
                 Icon(Icons.Default.List, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("Events")
+            }
+        }
+
+        if (serviceRunning) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(
+                onClick = onTestDetection,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.error
+                )
+            ) {
+                Icon(Icons.Default.Warning, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Test Detection")
             }
         }
 

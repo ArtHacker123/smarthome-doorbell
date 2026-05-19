@@ -38,7 +38,9 @@ class VideoStorageManager(
         if (!dayDir.exists()) dayDir.mkdirs()
 
         val timestamp = System.currentTimeMillis()
-        File(dayDir, "$timestamp.mp4")
+        val file = File(dayDir, "$timestamp.mp4")
+        file.createNewFile()
+        file
     }
 
     suspend fun createThumbnailDir(): File = withContext(Dispatchers.IO) {

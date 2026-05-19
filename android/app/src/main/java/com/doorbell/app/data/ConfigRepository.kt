@@ -34,7 +34,7 @@ class ConfigRepository(private val context: Context) {
             sensitivity = preferences[SENSITIVITY] ?: 0.7f,
             minDuration = preferences[MIN_DURATION] ?: 2,
             cooldown = preferences[COOLDOWN] ?: 60,
-            recordDuration = preferences[RECORD_DURATION] ?: 10,
+            recordDuration = preferences[RECORD_DURATION] ?: 3,
             retentionDays = preferences[RETENTION_DAYS] ?: 30,
             screenTimeout = preferences[SCREEN_TIMEOUT] ?: 30,
             motionSensitivity = preferences[MOTION_SENSITIVITY] ?: 0.05f,

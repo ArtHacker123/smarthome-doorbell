@@ -1,5 +1,6 @@
 package com.doorbell.app.model
 
+import android.graphics.Bitmap
 import com.google.gson.annotations.SerializedName
 import java.util.UUID
 
@@ -7,7 +8,7 @@ data class DoorbellConfig(
     val sensitivity: Float = 0.7f,
     val minDuration: Int = 2,
     val cooldown: Int = 60,
-    val recordDuration: Int = 10,
+    val recordDuration: Int = 3,
     val retentionDays: Int = 30,
     val screenTimeout: Int = 30,
     val motionSensitivity: Float = 0.05f,
@@ -80,3 +81,10 @@ enum class ServiceState {
     COOLDOWN,
     SLEEP
 }
+
+data class DetectionCommand(
+    val eventId: String = UUID.randomUUID().toString(),
+    val timestamp: Long = System.currentTimeMillis(),
+    val confidence: Float,
+    val frame: Bitmap? = null
+)

@@ -30,10 +30,12 @@ import com.doorbell.app.model.*
 import com.doorbell.app.network.RtspServer
 import com.doorbell.app.network.WebSocketClient
 import com.doorbell.app.storage.ThumbnailManager
+import com.doorbell.app.storage.VideoEncoder
 import com.doorbell.app.storage.VideoStorageManager
 import com.doorbell.app.ui.MainActivity
 import com.google.gson.Gson
 import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
 import java.io.ByteArrayOutputStream
 import java.util.UUID
@@ -51,6 +53,7 @@ class DoorbellService : Service() {
     private var motionDetector: MotionDetector? = null
     private var videoStorage: VideoStorageManager? = null
     private var thumbnailManager: ThumbnailManager? = null
+    private var videoEncoder: VideoEncoder? = null
     private var webSocketClient: WebSocketClient? = null
     private var rtspServer: RtspServer? = null
 
@@ -69,13 +72,11 @@ class DoorbellService : Service() {
     private val _connectionState = MutableStateFlow(WebSocketClient.ConnectionState.DISCONNECTED)
     val connectionState: StateFlow<WebSocketClient.ConnectionState> = _connectionState
 
-    private var lastDetectionTime = 0L
-    private var recordingJob: Job? = null
-    private var cooldownJob: Job? = null
     private var cleanupJob: Job? = null
     private var batteryCheckJob: Job? = null
     private var screenWakeLock: PowerManager.WakeLock? = null
     private var screenOffJob: Job? = null
+    private val detectionChannel = Channel<DetectionCommand>(Channel.BUFFERED)
 
     private var cameraProvider: ProcessCameraProvider? = null
     private var imageAnalysisUseCase: ImageAnalysis? = null
@@ -91,8 +92,7 @@ class DoorbellService : Service() {
 
     private var deviceId: String = ""
     private var currentVideoFile: java.io.File? = null
-    private var currentThumbDir: java.io.File? = null
-    private var thumbnailIndex = 0
+    private val recordingFrames = mutableListOf<Bitmap>()
 
     private val isServiceRunning = AtomicBoolean(false)
 
@@ -186,6 +186,7 @@ class DoorbellService : Service() {
 
         personDetector = PersonDetector(config)
         motionDetector = MotionDetector(config.motionSensitivity, config.motionPixelThreshold)
+        videoEncoder = VideoEncoder()
 
         if (config.pcServerAddress.isNotEmpty()) {
             webSocketClient = WebSocketClient(config.pcServerAddress, config.pcServerPort).also {
@@ -199,6 +200,7 @@ class DoorbellService : Service() {
         rtspServer?.start()
 
         initializeCamera()
+        startEventDispatcher()
 
         _serviceState.value = ServiceState.SURVEILLANCE
         currentInstance = this@DoorbellService
@@ -251,11 +253,7 @@ class DoorbellService : Service() {
                             val now = System.currentTimeMillis()
                             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
                             val screenOn = pm.isInteractive()
-                            val interval = when {
-                                _serviceState.value == ServiceState.RECORDING -> 33L
-                                screenOn -> 33L
-                                else -> 333L
-                            }
+                            val interval = if (screenOn) 33L else 333L
                             if (now - lastFrameTime < interval) {
                                 imageProxy.close()
                                 return@setAnalyzer
@@ -408,26 +406,94 @@ class DoorbellService : Service() {
             acquireScreenWakeLock()
         }
 
-        if (_serviceState.value == ServiceState.COOLDOWN) return
+        if (_isRecording.value) {
+            synchronized(recordingFrames) {
+                recordingFrames.add(bitmap.copy(Bitmap.Config.ARGB_8888, false))
+            }
+        }
+
+        if (_serviceState.value != ServiceState.SURVEILLANCE) return
 
         personDetector?.processFrame(bitmap) {
-            onPersonDetected()
+            Log.i(TAG, "[EVENT] person detected, emitting DetectionCommand")
+            detectionChannel.trySend(DetectionCommand(
+                confidence = 0.95f,
+                frame = bitmap
+            ))
         }
     }
 
-    private fun onPersonDetected() {
-        val currentTime = System.currentTimeMillis()
-        if (currentTime - lastDetectionTime < config.cooldown * 1000) {
-            return
-        }
-        lastDetectionTime = currentTime
-
-        acquireScreenWakeLock()
-        _serviceState.value = ServiceState.RECORDING
-
+    private fun startEventDispatcher() {
         serviceScope.launch {
-            startRecording()
+            for (cmd in detectionChannel) {
+                Log.i(TAG, "[EVENT] dispatching event $cmd")
+                _serviceState.value = ServiceState.RECORDING
+
+                val r = async { handleRecording(cmd) }
+                val s = async { handleScreenshots(cmd) }
+                handleEventReport(cmd)
+
+                r.await()
+                val thumbnails = s.await()
+
+                Log.i(TAG, "[EVENT] recording+screenshots done, cooldown ${config.cooldown}s")
+                _serviceState.value = ServiceState.COOLDOWN
+                delay(config.cooldown * 1000L)
+                _serviceState.value = ServiceState.SURVEILLANCE
+            }
         }
+    }
+
+    private suspend fun handleRecording(cmd: DetectionCommand) {
+        _isRecording.value = true
+        val videoFile = videoStorage?.createVideoFile()
+        currentVideoFile = videoFile
+        Log.i(TAG, "[RECORD] started: ${videoFile?.absolutePath}")
+        delay(config.recordDuration * 1000L)
+        _isRecording.value = false
+
+        val frames = synchronized(recordingFrames) {
+            recordingFrames.toList().also { recordingFrames.clear() }
+        }
+        Log.i(TAG, "[RECORD] collected ${frames.size} frames for encoding")
+        if (frames.isNotEmpty() && videoFile != null) {
+            withContext(Dispatchers.IO) {
+                videoEncoder?.encodeFrames(frames, videoFile)
+            }
+            Log.i(TAG, "[RECORD] finished: ${videoFile.absolutePath}, size=${videoFile.length()} bytes")
+        } else {
+            Log.w(TAG, "[RECORD] no frames to encode, deleting empty file")
+            videoFile?.delete()
+        }
+    }
+
+    private suspend fun handleScreenshots(cmd: DetectionCommand): List<String> {
+        val thumbDir = videoStorage?.createThumbnailDir() ?: return emptyList()
+        val paths = mutableListOf<String>()
+        cmd.frame?.let { frame ->
+            val saved = thumbnailManager?.saveThumbnail(frame, thumbDir, 0)
+            if (saved != null) {
+                paths.add(saved)
+                Log.i(TAG, "[SCREENSHOT] saved #0: $saved")
+            }
+        }
+        // TODO: 通过 CameraX ImageCapture 拍摄图2、图3
+        // 目前只有检测帧的首张截图
+        return paths
+    }
+
+    private fun handleEventReport(cmd: DetectionCommand) {
+        val event = DetectionEvent(
+            id = cmd.eventId,
+            deviceId = deviceId,
+            timestamp = System.currentTimeMillis(),
+            type = EventType.PERSON_DETECTED,
+            confidence = cmd.confidence,
+            duration = config.recordDuration
+        )
+        _events.value = _events.value + event
+        webSocketClient?.sendEvent(event)
+        Log.i(TAG, "[EVENT] reported via WebSocket: ${event.id}")
     }
 
     @Suppress("DEPRECATION")
@@ -455,60 +521,6 @@ class DoorbellService : Service() {
         screenWakeLock?.release()
         screenWakeLock = null
         screenOffJob = null
-    }
-
-    private suspend fun startRecording() {
-        _isRecording.value = true
-
-        val videoFile = videoStorage?.createVideoFile()
-        val thumbDir = videoStorage?.createThumbnailDir()
-
-        currentVideoFile = videoFile
-        currentThumbDir = thumbDir
-        thumbnailIndex = 0
-
-        val eventId = UUID.randomUUID().toString()
-        val thumbnailPaths = mutableListOf<String>()
-
-        recordingJob = serviceScope.launch {
-            delay(config.recordDuration * 1000L)
-            stopRecording(eventId, thumbnailPaths)
-        }
-
-        for (i in 1..3) {
-            delay(500)
-        }
-
-        _serviceState.value = ServiceState.SURVEILLANCE
-    }
-
-    private suspend fun stopRecording(eventId: String, thumbnailPaths: List<String>) {
-        _isRecording.value = false
-        _serviceState.value = ServiceState.SURVEILLANCE
-
-        val event = DetectionEvent(
-            id = eventId,
-            deviceId = deviceId,
-            timestamp = System.currentTimeMillis(),
-            type = EventType.PERSON_DETECTED,
-            confidence = 0.95f,
-            thumbnails = thumbnailPaths,
-            duration = config.recordDuration
-        )
-
-        _events.value = _events.value + event
-        webSocketClient?.sendEvent(event)
-
-        startCooldown()
-    }
-
-    private fun startCooldown() {
-        cooldownJob?.cancel()
-        cooldownJob = serviceScope.launch {
-            delay(config.cooldown * 1000L)
-            _serviceState.value = ServiceState.SURVEILLANCE
-        }
-        _serviceState.value = ServiceState.COOLDOWN
     }
 
     private fun scheduleCleanup() {
@@ -560,6 +572,18 @@ class DoorbellService : Service() {
             )
             _events.value = _events.value + event
             webSocketClient?.sendEvent(event)
+        }
+    }
+
+    fun testSimulateDetection() {
+        Log.i(TAG, "[TEST] simulating person detection")
+        serviceScope.launch {
+            _previewBitmap.value?.let { frame ->
+                detectionChannel.trySend(DetectionCommand(
+                    confidence = 0.95f,
+                    frame = frame
+                ))
+            }
         }
     }
 

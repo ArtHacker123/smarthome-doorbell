@@ -129,8 +129,8 @@ fun SettingsScreen(
             Slider(
                 value = recordDuration.toFloat(),
                 onValueChange = { recordDuration = it.toInt() },
-                valueRange = 5f..30f,
-                steps = 24
+                valueRange = 1f..30f,
+                steps = 28
             )
 
             Spacer(modifier = Modifier.height(8.dp))
