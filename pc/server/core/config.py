@@ -15,6 +15,8 @@ class ServerConfig(BaseModel):
     database_url: str = "sqlite+aiosqlite:///./doorbell.db"
     storage_path: str = "./storage"
     log_level: str = "INFO"
+    agent_ws_endpoint: str = "/ws/agent"
+    agent_mcp_enabled: bool = True
 
 
 class Config:

@@ -15,6 +15,8 @@ from uvicorn import Config, Server
 from .core.config import get_config
 from .models.models import Database
 from .websocket.server import ws_manager
+from .agent.ws_handler import agent_ws_handler
+from .agent.mcp_server import DoorbellMCPServer
 
 logging.basicConfig(
     level=logging.INFO,
@@ -29,6 +31,7 @@ class DoorbellServer:
         self.db = Database(self.config.database_url)
         self.http_server = None
         self.app = None
+        self.mcp_server = DoorbellMCPServer(self.db, self.config.storage_path) if self.config.agent_mcp_enabled else None
 
     async def init(self):
         await self.db.init_db()
@@ -56,6 +59,21 @@ class DoorbellServer:
         )
         await self.db.create_event(event)
         logger.info(f"Event stored: {event.id}")
+        
+        agent_payload = {
+            "type": "event",
+            "data": {
+                "eventId": event.id,
+                "deviceId": event.device_id,
+                "eventType": event.event_type,
+                "confidence": event.confidence,
+                "timestamp": int(event.timestamp.timestamp() * 1000) if event.timestamp else 0,
+                "hasSnapshot": bool(data.get("thumbnails")),
+                "snapshotUrl": data.get("thumbnails", [None])[0] if data.get("thumbnails") else None,
+                "hasVideo": False
+            }
+        }
+        await agent_ws_handler.broadcast(agent_payload)
         
         await ws_manager.broadcast({
             "type": "event",
@@ -182,6 +200,10 @@ class DoorbellServer:
                 )
                 await session.commit()
 
+            await agent_ws_handler.broadcast({
+                "type": "video_ready",
+                "data": {"eventId": event_id, "url": url}
+            })
             await ws_manager.broadcast({
                 "type": "video_ready",
                 "data": {"eventId": event_id, "url": url}
@@ -233,6 +255,10 @@ class DoorbellServer:
                     if message.get("type") == "register":
                         device_id = message.get("data", {}).get("deviceId", "unknown")
                         await ws_manager.handle_register(websocket, message.get("data", {}), device_id)
+                        await agent_ws_handler.broadcast({
+                            "type": "device_status",
+                            "data": {"deviceId": device_id, "online": True}
+                        })
                     elif message.get("type") == "event":
                         await self.handle_event(message.get("data"))
                     elif message.get("type") == "heartbeat":
@@ -240,6 +266,10 @@ class DoorbellServer:
                     elif message.get("type") == "video_not_found":
                         event_id = message.get("data", {}).get("eventId", "unknown")
                         logger.warning(f"Video not found for event: {event_id}")
+                        await agent_ws_handler.broadcast({
+                            "type": "video_not_found",
+                            "data": {"eventId": event_id}
+                        })
                         await ws_manager.broadcast({
                             "type": "video_not_found",
                             "data": {"eventId": event_id}
@@ -247,10 +277,34 @@ class DoorbellServer:
                         
             except WebSocketDisconnect:
                 ws_manager.disconnect(websocket, device_id)
+                await agent_ws_handler.broadcast({
+                    "type": "device_status",
+                    "data": {"deviceId": device_id, "online": False}
+                })
             except Exception as e:
                 logger.error(f"WebSocket error: {e}")
 
         self.app.websocket_route("/ws")(ws_handler)
+
+        async def agent_ws_route(websocket: WebSocket):
+            await websocket.accept()
+            agent_ws_handler.connect(websocket)
+            try:
+                while True:
+                    data = await websocket.receive_text()
+                    message = json.loads(data)
+                    if message.get("type") == "register" and message.get("role") == "agent":
+                        logger.info("Agent registered via WebSocket")
+            except WebSocketDisconnect:
+                agent_ws_handler.disconnect(websocket)
+            except Exception as e:
+                logger.error(f"Agent WebSocket error: {e}")
+
+        self.app.websocket_route(self.config.agent_ws_endpoint)(agent_ws_route)
+
+        if self.mcp_server:
+            self.mcp_server.register_sse_routes(self.app)
+            logger.info("MCP Server SSE routes registered at /mcp")
 
         config = Config(
             app=self.app,
