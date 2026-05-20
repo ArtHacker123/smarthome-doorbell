@@ -1,6 +1,7 @@
 """
 Database models and management.
 """
+import logging
 from datetime import datetime
 from typing import Optional, List
 from sqlalchemy import Column, String, Integer, Float, DateTime, Text, Boolean
@@ -8,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 from sqlalchemy.orm import declarative_base
 from pydantic import BaseModel
 
+logger = logging.getLogger(__name__)
 Base = declarative_base()
 
 
@@ -127,18 +129,32 @@ class Database:
     async def get_events(
         self, 
         device_id: Optional[str] = None, 
+        since: Optional[int] = None,
         limit: int = 100,
         offset: int = 0
     ) -> List[Event]:
         async with self.async_session() as session:
             from sqlalchemy import select, desc
+            from datetime import datetime
             query = select(Event).order_by(desc(Event.timestamp)).limit(limit).offset(offset)
             
             if device_id:
                 query = query.where(Event.device_id == device_id)
+            if since is not None:
+                since_dt = datetime.fromtimestamp(since / 1000)
+                logger.info(f"[DB] get_events applying filter: Event.timestamp >= {since_dt.isoformat()} (since={since})")
+                query = query.where(Event.timestamp >= since_dt)
+            
+            compiled = query.compile(compile_kwargs={"literal_binds": True})
+            logger.info(f"[DB] get_events SQL: {compiled}")
             
             result = await session.execute(query)
-            return list(result.scalars().all())
+            rows = list(result.scalars().all())
+            logger.info(f"[DB] get_events returned {len(rows)} rows")
+            if rows:
+                logger.info(f"[DB] first row: id={rows[0].id[:8]} ts={rows[0].timestamp}")
+                logger.info(f"[DB] last  row: id={rows[-1].id[:8]} ts={rows[-1].timestamp}")
+            return rows
 
     async def mark_event_read(self, event_id: str):
         async with self.async_session() as session:

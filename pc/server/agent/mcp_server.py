@@ -100,6 +100,7 @@ class DoorbellMCPServer:
         if method == "tools/call":
             name = params.get("name", "")
             args = params.get("arguments", {}) or {}
+            logger.info(f"tools/call received: name={name}, args={json.dumps(args)}")
             try:
                 if name == "doorbell_list_events":
                     result = await self._list_events(**args)
@@ -133,13 +134,18 @@ class DoorbellMCPServer:
         }
 
     async def _list_events(self, since: Optional[int] = None, limit: int = 20) -> dict:
+        logger.info(f"_list_events called: since={since!r} (type={type(since).__name__}), limit={limit!r} (type={type(limit).__name__})")
+        if since is not None:
+            from datetime import datetime
+            dt = datetime.fromtimestamp(since / 1000)
+            logger.info(f"  since={since} -> datetime={dt.isoformat()}")
         limit = min(limit, 100)
-        events = await self.db.get_events(limit=limit)
+        events = await self.db.get_events(limit=limit, since=since)
+        logger.info(f"  db.get_events returned {len(events)} raw events")
         items = []
         for e in events:
             ts = int(e.timestamp.timestamp() * 1000) if e.timestamp else 0
-            if since and ts < since:
-                continue
+            logger.info(f"  building item for event id={e.id[:8]} ts={ts} type={e.event_type}")
             thumb_dir = os.path.join(self.storage_path, "thumbnails", e.id)
             video_dir = os.path.join(self.storage_path, "videos", e.id)
             items.append({
@@ -152,29 +158,33 @@ class DoorbellMCPServer:
                 "hasVideo": bool(e.video_path) or os.path.exists(os.path.join(video_dir, "recording.mp4")),
                 "videoUrl": e.video_path or ""
             })
-        return {"events": items, "total": len(items)}
+        logger.info(f"  returning {len(items)} items in result")
+        return {"content": [{"type": "text", "text": json.dumps({"events": items, "total": len(items)})}]}
 
     async def _get_snapshot(self, eventId: str, format: str = "url") -> dict:
         thumb_path = os.path.join(self.storage_path, "thumbnails", eventId, "thumb_0.jpg")
         if not os.path.exists(thumb_path):
-            return {"error": "snapshot not found"}
+            return {"content": [{"type": "text", "text": '{"error": "snapshot not found"}'}]}
         url = f"/api/storage/thumbnails/{eventId}/thumb_0.jpg"
         if format == "base64":
             with open(thumb_path, "rb") as f:
                 data = base64.b64encode(f.read()).decode("utf-8")
-            return {"eventId": eventId, "url": url, "base64": data, "mimeType": "image/jpeg"}
-        return {"eventId": eventId, "url": url}
+            result = {"eventId": eventId, "url": url, "base64": data, "mimeType": "image/jpeg"}
+            return {"content": [{"type": "text", "text": json.dumps(result)}]}
+        result = {"eventId": eventId, "url": url}
+        return {"content": [{"type": "text", "text": json.dumps(result)}]}
 
     async def _get_video_info(self, eventId: str) -> dict:
         video_path = os.path.join(self.storage_path, "videos", eventId, "recording.mp4")
         if not os.path.exists(video_path):
             video_path_legacy = os.path.join(self.storage_path, "videos", f"{eventId}.mp4")
             if not os.path.exists(video_path_legacy):
-                return {"error": "video not found"}
+                return {"content": [{"type": "text", "text": '{"error": "video not found"}'}]}
             video_path = video_path_legacy
         file_size = os.path.getsize(video_path)
         url = f"/api/storage/videos/{eventId}/recording.mp4"
-        return {"eventId": eventId, "videoUrl": url, "fileSize": file_size, "mimeType": "video/mp4"}
+        result = {"eventId": eventId, "videoUrl": url, "fileSize": file_size, "mimeType": "video/mp4"}
+        return {"content": [{"type": "text", "text": json.dumps(result)}]}
 
     def register_sse_routes(self, fastapi_app):
         sessions: dict[str, asyncio.Queue] = {}
@@ -204,7 +214,9 @@ class DoorbellMCPServer:
         @fastapi_app.post("/mcp")
         async def mcp_post(request: Request):
             body = await request.json()
+            logger.info(f"MCP POST request body: {json.dumps(body, default=str)}")
             result = await self.handle_jsonrpc(body)
+            logger.info(f"MCP POST response: {json.dumps(result, default=str)}")
             if result is not None:
                 for q in list(sessions.values()):
                     await q.put(result)

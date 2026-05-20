@@ -12,10 +12,20 @@ sys.path.insert(0, str(Path(__file__).parent))
 from server.main import DoorbellServer
 from server.cli.commands import create_cli
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+_log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+_log_formatter = logging.Formatter(_log_format)
+
+_console_handler = logging.StreamHandler(sys.stdout)
+_console_handler.setFormatter(_log_formatter)
+
+_file_handler = logging.FileHandler(Path(__file__).parent / "server.log", mode="a", encoding="utf-8")
+_file_handler.setFormatter(_log_formatter)
+
+_root_logger = logging.getLogger()
+_root_logger.setLevel(logging.INFO)
+_root_logger.addHandler(_console_handler)
+_root_logger.addHandler(_file_handler)
+
 logger = logging.getLogger(__name__)
 
 
