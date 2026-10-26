@@ -130,7 +130,7 @@ fun PreviewScreen(
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(1f),
+                .aspectRatio(3f / 4f),
             shape = MaterialTheme.shapes.large,
             elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
         ) {
@@ -179,23 +179,24 @@ fun PreviewScreen(
                     }
                 }
 
-                if (serviceRunning) {
-                    Spacer(modifier = Modifier.height(12.dp))
-                    OutlinedButton(
-                        onClick = onTestDetection,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Default.Warning, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Simulate Detection")
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp)
+                        .padding(top = 12.dp)
+                ) {
+                    if (serviceRunning) {
+                        OutlinedButton(
+                            onClick = onTestDetection,
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = false
+                        ) {
+                            Icon(Icons.Default.Warning, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Simulate Detection")
+                        }
                     }
                 }
-
-                Spacer(modifier = Modifier.height(12.dp))
-                Divider()
-                Spacer(modifier = Modifier.height(12.dp))
-
-                StatusCard(serviceRunning = serviceRunning, connectionState = connectionState)
             }
         }
     }
