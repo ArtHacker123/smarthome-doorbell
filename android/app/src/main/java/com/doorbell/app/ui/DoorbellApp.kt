@@ -9,11 +9,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.doorbell.app.network.WebSocketClient
 import com.doorbell.app.service.DoorbellService
@@ -25,19 +25,46 @@ fun DoorbellApp(
     onStopService: () -> Unit
 ) {
     val navController = rememberNavController()
-    val context = LocalContext.current
 
     var serviceRunning by remember { mutableStateOf(false) }
     val connectionState by DoorbellService.connectionStateState.collectAsStateWithLifecycle()
+
+    val items = listOf(
+        BottomNavItem("preview", "Home", Icons.Default.Home),
+        BottomNavItem("events", "Events", Icons.Default.List),
+        BottomNavItem("settings", "Settings", Icons.Default.Settings)
+    )
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Smart Doorbell") },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    titleContentColor = MaterialTheme.colorScheme.onPrimary
                 )
             )
+        },
+        bottomBar = {
+            NavigationBar {
+                val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
+                items.forEach { item ->
+                    NavigationBarItem(
+                        icon = { Icon(item.icon, contentDescription = item.label) },
+                        label = { Text(item.label) },
+                        selected = currentRoute == item.route,
+                        onClick = {
+                            if (currentRoute != item.route) {
+                                navController.navigate(item.route) {
+                                    popUpTo("preview") { saveState = true }
+                                    launchSingleTop = true
+                                    restoreState = true
+                                }
+                            }
+                        }
+                    )
+                }
+            }
         }
     ) { padding ->
         NavHost(
@@ -59,26 +86,33 @@ fun DoorbellApp(
                     },
                     onTestDetection = {
                         DoorbellService.currentInstance?.testSimulateDetection()
-                    },
-                    onNavigateToSettings = { navController.navigate("settings") },
-                    onNavigateToEvents = { navController.navigate("events") }
+                    }
                 )
             }
 
             composable("settings") {
                 SettingsScreen(
-                    onNavigateBack = { navController.popBackStack() }
+                    onSave = {
+                        navController.navigate("preview") {
+                            popUpTo("preview") { inclusive = false }
+                            launchSingleTop = true
+                        }
+                    }
                 )
             }
 
             composable("events") {
-                EventHistoryScreen(
-                    onNavigateBack = { navController.popBackStack() }
-                )
+                EventHistoryScreen()
             }
         }
     }
 }
+
+data class BottomNavItem(
+    val route: String,
+    val label: String,
+    val icon: androidx.compose.ui.graphics.vector.ImageVector
+)
 
 @Composable
 fun PreviewScreen(
@@ -86,9 +120,7 @@ fun PreviewScreen(
     connectionState: WebSocketClient.ConnectionState,
     onStartService: () -> Unit,
     onStopService: () -> Unit,
-    onTestDetection: () -> Unit,
-    onNavigateToSettings: () -> Unit,
-    onNavigateToEvents: () -> Unit
+    onTestDetection: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -98,17 +130,19 @@ fun PreviewScreen(
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(3f / 4f)
+                .weight(1f),
+            shape = MaterialTheme.shapes.large,
+            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
         ) {
             Box(
                 modifier = Modifier.fillMaxSize()
             ) {
                 CameraPreview(modifier = Modifier.fillMaxSize())
 
-                Column(
+                Row(
                     modifier = Modifier
-                        .align(androidx.compose.ui.Alignment.TopEnd)
-                        .padding(8.dp)
+                        .align(androidx.compose.ui.Alignment.TopStart)
+                        .padding(12.dp)
                 ) {
                     ConnectionStatusBadge(connectionState)
                 }
@@ -117,52 +151,53 @@ fun PreviewScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Row(
+        Card(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
         ) {
-            OutlinedButton(
-                onClick = if (serviceRunning) onStopService else onStartService
+            Column(
+                modifier = Modifier.padding(16.dp)
             ) {
-                Icon(
-                    imageVector = if (serviceRunning) Icons.Default.Close else Icons.Default.PlayArrow,
-                    contentDescription = null
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(if (serviceRunning) "Stop" else "Start")
-            }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Button(
+                        onClick = if (serviceRunning) onStopService else onStartService,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (serviceRunning) MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.primary
+                        )
+                    ) {
+                        Icon(
+                            imageVector = if (serviceRunning) Icons.Default.Close else Icons.Default.PlayArrow,
+                            contentDescription = null
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(if (serviceRunning) "Stop Monitoring" else "Start Monitoring")
+                    }
+                }
 
-            OutlinedButton(onClick = onNavigateToSettings) {
-                Icon(Icons.Default.Settings, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Settings")
-            }
+                if (serviceRunning) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedButton(
+                        onClick = onTestDetection,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Warning, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Simulate Detection")
+                    }
+                }
 
-            OutlinedButton(onClick = onNavigateToEvents) {
-                Icon(Icons.Default.List, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Events")
+                Spacer(modifier = Modifier.height(12.dp))
+                Divider()
+                Spacer(modifier = Modifier.height(12.dp))
+
+                StatusCard(serviceRunning = serviceRunning, connectionState = connectionState)
             }
         }
-
-        if (serviceRunning) {
-            Spacer(modifier = Modifier.height(8.dp))
-            Button(
-                onClick = onTestDetection,
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.error
-                )
-            ) {
-                Icon(Icons.Default.Warning, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Test Detection")
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        StatusCard(serviceRunning = serviceRunning, connectionState = connectionState)
     }
 }
 
@@ -190,12 +225,13 @@ fun ConnectionStatusBadge(state: WebSocketClient.ConnectionState) {
     }
 
     Surface(
-        color = color.copy(alpha = 0.9f),
-        shape = MaterialTheme.shapes.small
+        color = color.copy(alpha = 0.95f),
+        shape = MaterialTheme.shapes.small,
+        shadowElevation = 2.dp
     ) {
         Text(
             text = text,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.surface
         )
@@ -204,42 +240,60 @@ fun ConnectionStatusBadge(state: WebSocketClient.ConnectionState) {
 
 @Composable
 fun StatusCard(serviceRunning: Boolean, connectionState: WebSocketClient.ConnectionState) {
-    Card(
+    Column(
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
-        ) {
-            Text(
-                text = "Status",
-                style = MaterialTheme.typography.titleMedium
-            )
-            Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "System Status",
+            style = MaterialTheme.typography.titleMedium
+        )
+        Spacer(modifier = Modifier.height(8.dp))
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+        ) {
+            Text("Monitoring Service")
+            Surface(
+                color = if (serviceRunning) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                shape = MaterialTheme.shapes.small
             ) {
-                Text("Service")
                 Text(
-                    text = if (serviceRunning) "Running" else "Stopped",
-                    color = if (serviceRunning) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.outline
+                    text = if (serviceRunning) "Active" else "Inactive",
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (serviceRunning) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+        }
 
-            Divider(modifier = Modifier.padding(vertical = 8.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+        ) {
+            Text("Server Connection")
+            Surface(
+                color = when (connectionState) {
+                    WebSocketClient.ConnectionState.CONNECTED -> MaterialTheme.colorScheme.primaryContainer
+                    WebSocketClient.ConnectionState.CONNECTING -> MaterialTheme.colorScheme.tertiaryContainer
+                    WebSocketClient.ConnectionState.ERROR -> MaterialTheme.colorScheme.errorContainer
+                    WebSocketClient.ConnectionState.DISCONNECTED -> MaterialTheme.colorScheme.surfaceVariant
+                },
+                shape = MaterialTheme.shapes.small
             ) {
-                Text("Connection")
                 Text(
                     text = connectionState.name.lowercase().replaceFirstChar { it.uppercase() },
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                    style = MaterialTheme.typography.labelMedium,
                     color = when (connectionState) {
-                        WebSocketClient.ConnectionState.CONNECTED -> MaterialTheme.colorScheme.primary
-                        else -> MaterialTheme.colorScheme.outline
+                        WebSocketClient.ConnectionState.CONNECTED -> MaterialTheme.colorScheme.onPrimaryContainer
+                        WebSocketClient.ConnectionState.CONNECTING -> MaterialTheme.colorScheme.onTertiaryContainer
+                        WebSocketClient.ConnectionState.ERROR -> MaterialTheme.colorScheme.onErrorContainer
+                        WebSocketClient.ConnectionState.DISCONNECTED -> MaterialTheme.colorScheme.onSurfaceVariant
                     }
                 )
             }

@@ -4,7 +4,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -14,8 +13,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
-    onNavigateBack: () -> Unit,
-    viewModel: SettingsViewModel = viewModel()
+    viewModel: SettingsViewModel = viewModel(),
+    onSave: () -> Unit = {}
 ) {
     val config by viewModel.config.collectAsState()
 
@@ -31,13 +30,41 @@ fun SettingsScreen(
     var pcServerAddress by remember(config) { mutableStateOf(config.pcServerAddress) }
     var pcServerPort by remember(config) { mutableIntStateOf(config.pcServerPort) }
 
+    val saveConfig = {
+        viewModel.updateConfig(
+            config.copy(
+                sensitivity = sensitivity,
+                minDuration = minDuration,
+                cooldown = cooldown,
+                motionSensitivity = motionSensitivity,
+                motionPixelThreshold = motionPixelThreshold,
+                zoomRatio = zoomRatio,
+                recordDuration = recordDuration,
+                retentionDays = retentionDays,
+                screenTimeout = screenTimeout,
+                pcServerAddress = pcServerAddress,
+                pcServerPort = pcServerPort
+            )
+        )
+        onSave()
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Settings") },
-                navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    titleContentColor = MaterialTheme.colorScheme.onPrimary,
+                    actionIconContentColor = MaterialTheme.colorScheme.onPrimary
+                ),
+                actions = {
+                    TextButton(onClick = saveConfig) {
+                        Text(
+                            text = "Save",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
                     }
                 }
             )
@@ -181,30 +208,7 @@ fun SettingsScreen(
                 singleLine = true
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
-
-            Button(
-                onClick = {
-                    viewModel.updateConfig(
-                        config.copy(
-                            sensitivity = sensitivity,
-                            minDuration = minDuration,
-                            cooldown = cooldown,
-                            motionSensitivity = motionSensitivity,
-                            motionPixelThreshold = motionPixelThreshold,
-                            zoomRatio = zoomRatio,
-                            recordDuration = recordDuration,
-                            retentionDays = retentionDays,
-                            screenTimeout = screenTimeout,
-                            pcServerAddress = pcServerAddress,
-                            pcServerPort = pcServerPort
-                        )
-                    )
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Save Settings")
-            }
+            Spacer(modifier = Modifier.height(32.dp))
         }
     }
 }
